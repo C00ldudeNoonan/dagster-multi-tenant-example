@@ -8,3 +8,4 @@ __pycache__/
 *.pyc
 data/
 *.egg-info/
+MULTI_TENANT_WEBINAR_DEMO_SPEC.md
