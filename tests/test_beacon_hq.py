@@ -4,7 +4,6 @@ from pathlib import Path
 
 import dagster as dg
 
-from shared.io_managers import make_duckdb_io_manager
 from beacon_hq import defs
 from beacon_hq.assets.reports import (
     briefing_highlights,
@@ -14,7 +13,62 @@ from beacon_hq.assets.reports import (
     executive_summary,
     risk_overview,
 )
+from beacon_hq.sensors import _orchestration_date_for_run, beacon_after_upstream_success_sensor
+from shared.io_managers import make_duckdb_io_manager
 from tests.fakes import MockLLMResource
+
+
+@dg.op
+def _noop() -> int:
+    return 1
+
+
+def _make_upstream_job(job_name: str) -> dg.JobDefinition:
+    @dg.job(name=job_name)
+    def _job() -> None:
+        _noop()
+
+    return _job
+
+
+def _execute_success(
+    instance: dg.DagsterInstance,
+    *,
+    job_name: str,
+    tags: dict[str, str] | None = None,
+) -> dg.ExecuteInProcessResult:
+    result = _make_upstream_job(job_name).execute_in_process(instance=instance, tags=tags)
+    assert result.success
+    return result
+
+
+def _build_success_context(
+    instance: dg.DagsterInstance,
+    result: dg.ExecuteInProcessResult,
+) -> dg.RunStatusSensorContext:
+    dagster_event = _get_run_success_event(result)
+    return dg.build_run_status_sensor_context(
+        sensor_name="beacon_after_upstream_success_sensor",
+        dagster_instance=instance,
+        dagster_run=result.dagster_run,
+        dagster_event=dagster_event,
+    )
+
+
+def _get_run_success_event(
+    result: dg.ExecuteInProcessResult,
+) -> dg.DagsterEvent:
+    if hasattr(result, "get_run_success_event"):
+        return result.get_run_success_event()
+
+    if hasattr(result, "get_job_success_event"):
+        return result.get_job_success_event()
+
+    for event in reversed(result.all_events):
+        if getattr(event, "event_type_value", "") == "PIPELINE_SUCCESS":
+            return event
+
+    raise AssertionError("Could not find a run success event in the execute_in_process result.")
 
 
 def test_beacon_hq_definitions_load() -> None:
@@ -46,3 +100,38 @@ def test_beacon_hq_materializes(tmp_path: Path) -> None:
     assert result.success
     summary = result.output_for_node("executive_summary")
     assert "summary" in summary.columns
+
+
+def test_beacon_sensor_waits_for_missing_upstream_job() -> None:
+    instance = dg.DagsterInstance.ephemeral()
+    harbor_result = _execute_success(
+        instance,
+        job_name="harbor_catalog_publish_job",
+        tags={"orchestration_date": "2026-03-19"},
+    )
+
+    response = beacon_after_upstream_success_sensor(
+        _build_success_context(instance, harbor_result)
+    )
+
+    assert isinstance(response, dg.SkipReason)
+    assert "summit_risk_scoring_job" in response.skip_message
+
+
+def test_beacon_sensor_accepts_manual_ui_style_runs() -> None:
+    instance = dg.DagsterInstance.ephemeral()
+    harbor_result = _execute_success(instance, job_name="harbor_catalog_publish_job")
+    summit_result = _execute_success(instance, job_name="summit_risk_scoring_job")
+
+    response = beacon_after_upstream_success_sensor(
+        _build_success_context(instance, harbor_result)
+    )
+
+    assert isinstance(response, dg.RunRequest)
+    assert response.tags is not None
+    assert response.tags["tenant"] == "beacon_hq"
+    assert response.tags["triggered_by"] == "beacon_after_upstream_success_sensor"
+    assert response.tags["orchestration_date"] == _orchestration_date_for_run(
+        instance,
+        summit_result.dagster_run,
+    )

@@ -4,6 +4,7 @@ import errno
 import fcntl
 import json
 from importlib import metadata as importlib_metadata
+import os
 from pathlib import Path
 import time
 from typing import Any, Protocol
@@ -152,6 +153,69 @@ class OllamaLLMResource(dg.ConfigurableResource):
     def _distribution_string(self, package_name: str) -> str:
         version = importlib_metadata.version(package_name)
         return f"{package_name}=={version}"
+
+
+def build_llm_resource(
+    resource_cls: type[OllamaLLMResource],
+    *,
+    model_env_var: str,
+    default_model_name: str,
+    runtime_dependency_package: str,
+    legacy_model_env_var: str | None = None,
+) -> OllamaLLMResource:
+    return resource_cls(
+        model_name=_get_str_env(
+            model_env_var,
+            default=default_model_name,
+            legacy_name=legacy_model_env_var,
+        ),
+        base_url=_get_str_env(
+            "OLLAMA_BASE_URL",
+            default="http://localhost:11434",
+        ),
+        timeout_seconds=_get_float_env(
+            "OLLAMA_TIMEOUT_SECONDS",
+            default=300.0,
+        ),
+        lock_path=_get_str_env(
+            "OLLAMA_LOCK_PATH",
+            default="data/.ollama_generate.lock",
+        ),
+        lock_timeout_seconds=_get_float_env(
+            "OLLAMA_LOCK_TIMEOUT_SECONDS",
+            default=900.0,
+        ),
+        runtime_dependency_package=runtime_dependency_package,
+    )
+
+
+def _get_str_env(name: str, *, default: str, legacy_name: str | None = None) -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+
+    if legacy_name:
+        legacy_value = os.getenv(legacy_name)
+        if legacy_value:
+            return legacy_value
+
+    return default
+
+
+def _get_float_env(name: str, *, default: float, legacy_name: str | None = None) -> float:
+    raw_value = os.getenv(name)
+    source_name = name
+    if not raw_value and legacy_name:
+        raw_value = os.getenv(legacy_name)
+        source_name = legacy_name
+
+    if not raw_value:
+        return default
+
+    try:
+        return float(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"Environment variable {source_name} must be a float.") from exc
 
 
 class CatalogCoach(OllamaLLMResource):

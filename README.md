@@ -76,6 +76,12 @@ Each code location points at the same Ollama instance but uses its own default m
 - `summit_financial`: `qwen2.5:1.5b`
 - `beacon_hq`: `qwen2.5:0.5b`
 
+Business-facing environment variables:
+
+- `HARBOR_OUTFITTERS_MODEL`
+- `SUMMIT_FINANCIAL_MODEL`
+- `BEACON_HQ_MODEL`
+
 Each code location also has its own runtime marker package and version:
 
 - `harbor_outfitters`: `catalog_coach_runtime==1.4.0`

@@ -24,8 +24,7 @@ for location_spec in "${locations[@]}"; do
       perl -0pi -e "s|^#!.*python\\n|#!${env_dir}/bin/python\\n|" "${script_path}"
     fi
   done
-  (
-    cd "${root_dir}/vendor/${runtime_package}"
-    "${env_dir}/bin/python" setup.py develop
-  )
+  PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    "${env_dir}/bin/python" -m pip install --quiet --no-deps --editable \
+    "${root_dir}/vendor/${runtime_package}"
 done

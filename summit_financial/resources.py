@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import os
-
 from shared.io_managers import make_duckdb_io_manager
-from shared.resources import RiskReviewer
+from shared.resources import RiskReviewer, build_llm_resource
 
 
 def get_resources() -> dict[str, object]:
     return {
-        "llm": RiskReviewer(
-            model_name=os.getenv("TENANT_BETA_MODEL", "qwen2.5:1.5b"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            timeout_seconds=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "300")),
-            lock_path=os.getenv("OLLAMA_LOCK_PATH", "data/.ollama_generate.lock"),
-            lock_timeout_seconds=float(os.getenv("OLLAMA_LOCK_TIMEOUT_SECONDS", "900")),
+        "llm": build_llm_resource(
+            RiskReviewer,
+            model_env_var="SUMMIT_FINANCIAL_MODEL",
+            legacy_model_env_var="TENANT_BETA_MODEL",
+            default_model_name="qwen2.5:1.5b",
             runtime_dependency_package="risk_reviewer_runtime",
         ),
         "io_manager": make_duckdb_io_manager("summit_financial"),
